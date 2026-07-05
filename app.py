@@ -4,6 +4,7 @@ import aiohttp
 import feedparser
 import sqlite3
 import json
+import html
 import re
 import time
 import requests
@@ -272,6 +273,12 @@ SECTOR_COLORS = {
     "Technology": "🟣", "Retail": "🟡", "Transport": "⚪",
     "Government": "🔴", "Macro": "⚫", "Other": "⬜",
 }
+
+def safe_url(url: str) -> str:
+    """Only allow http(s) links in rendered HTML — neutralises javascript: URIs etc.
+    Scraped/AI content is untrusted and gets rendered with unsafe_allow_html=True."""
+    url = (url or "").strip()
+    return url if url.startswith(("http://", "https://")) else "#"
 
 # Classification is now driven by the "region" field on each source dict.
 # For items already in the DB without a region field, we fall back to keyword matching.
@@ -710,7 +717,7 @@ async def scrape_all(extra_sources=None):
     all_sources = SOURCES + (extra_sources or [])
     # High concurrency — all feeds fetched simultaneously
     connector = aiohttp.TCPConnector(
-        ssl=False, limit=50, limit_per_host=3,
+        limit=50, limit_per_host=3,
         ttl_dns_cache=300, use_dns_cache=True,
     )
     async with aiohttp.ClientSession(
@@ -1182,9 +1189,9 @@ else:
         for n in news:
             news_html += (
                 f'<div style="padding:8px 0;border-bottom:1px solid #1e293b;">'
-                f'<a href="{n["link"]}" target="_blank" style="font-size:13px;font-weight:600;color:#e2e8f0;">'
-                f'{n["title"]}</a>'
-                + (f'<div style="font-size:11px;color:#64748b;margin-top:3px">{n["summary"]}</div>' if n["summary"] else "")
+                f'<a href="{safe_url(n["link"])}" target="_blank" style="font-size:13px;font-weight:600;color:#e2e8f0;">'
+                f'{html.escape(n["title"])}</a>'
+                + (f'<div style="font-size:11px;color:#64748b;margin-top:3px">{html.escape(n["summary"])}</div>' if n["summary"] else "")
                 + f'</div>'
             )
         st.markdown(
@@ -1272,14 +1279,14 @@ with col_feed:
             sector_icon = SECTOR_COLORS.get(sector, "⬜")
 
             ticker_html = " ".join(
-                f'<span style="font-size:11px;background:#ede9fe;color:#5b21b6;padding:1px 7px;border-radius:4px">{t}</span>'
+                f'<span style="font-size:11px;background:#ede9fe;color:#5b21b6;padding:1px 7px;border-radius:4px">{html.escape(str(t))}</span>'
                 for t in tickers
             ) if tickers else ""
 
-            display_title = item["title"]
+            display_title = html.escape(item["title"])
             if keyword:
                 display_title = re.sub(
-                    f"({re.escape(keyword)})",
+                    f"({re.escape(html.escape(keyword))})",
                     r'<mark style="background:#fef08a">\1</mark>',
                     display_title, flags=re.IGNORECASE
                 )
@@ -1288,9 +1295,9 @@ with col_feed:
             lower_third_val = item.get("lower_third", "") or ""
 
             if item.get("enriched"):
-                sentiment_badge  = f'<span class="badge {sent_class}">{sentiment}</span>' if sentiment else ""
-                importance_badge = f'<span class="badge {imp_class}">{importance}</span>' if importance else ""
-                sector_text      = f'{sector_icon} {sector}' if sector else ""
+                sentiment_badge  = f'<span class="badge {sent_class}">{html.escape(sentiment)}</span>' if sentiment else ""
+                importance_badge = f'<span class="badge {imp_class}">{html.escape(importance)}</span>' if importance else ""
+                sector_text      = f'{sector_icon} {html.escape(sector)}' if sector else ""
                 ticker_block     = f'<span style="margin-left:6px">{ticker_html}</span>' if ticker_html else ""
                 meta_html        = f"{sentiment_badge}{importance_badge}{sector_text}{ticker_block}"
             else:
@@ -1305,7 +1312,7 @@ with col_feed:
                     '<div class="lt-accent"></div>'
                     '<div class="lt-body">'
                     f'<p class="lt-headline">{display_title}</p>'
-                    f'<p class="lt-sub">{lower_third_val}</p>'
+                    f'<p class="lt-sub">{html.escape(lower_third_val)}</p>'
                     '</div></div></div>'
                 )
             else:
@@ -1314,9 +1321,9 @@ with col_feed:
             with st.container():
                 st.markdown(f"""
                 <div class="news-card" style="border-left: 3px solid {card_border}; border-radius: 0 10px 10px 0; margin-bottom: 4px;">
-                  <div class="source-tag">{item['country']} {item['source']} · {pub}</div>
-                  <div class="headline"><a href="{item['link']}" target="_blank">{display_title}</a></div>
-                  <div class="summary">{ai_summary[:200]}</div>
+                  <div class="source-tag">{html.escape(item['country'])} {html.escape(item['source'])} · {pub}</div>
+                  <div class="headline"><a href="{safe_url(item['link'])}" target="_blank">{display_title}</a></div>
+                  <div class="summary">{html.escape(ai_summary[:200])}</div>
                   <div class="meta">{meta_html}</div>
                   {lt_html}
                 </div>
@@ -1408,8 +1415,8 @@ with col_detail:
                 angles = ["Data-focused", "Market reaction", "Investor angle", "Impact-focused", "Broad audience"]
                 for idx, pkg in enumerate(st.session_state["generated_headlines"]):
                     angle       = angles[idx] if idx < len(angles) else f"Variant {idx + 1}"
-                    headline    = pkg.get("headline", str(pkg)) if isinstance(pkg, dict) else str(pkg)
-                    lower_third = pkg.get("lower_third", "") if isinstance(pkg, dict) else ""
+                    headline    = html.escape(pkg.get("headline", str(pkg)) if isinstance(pkg, dict) else str(pkg))
+                    lower_third = html.escape(pkg.get("lower_third", "") if isinstance(pkg, dict) else "")
                     lt_html = (
                         f'<div class="lower-third-wrap">'
                         f'<div class="lt-eyebrow">Lower Third</div>'
@@ -1441,7 +1448,7 @@ with col_detail:
                         )
                     st.rerun()
                 if st.session_state["generated_teaser"]:
-                    st.markdown(f'<div class="content-box">{st.session_state["generated_teaser"]}</div>',
+                    st.markdown(f'<div class="content-box">{html.escape(st.session_state["generated_teaser"])}</div>',
                                 unsafe_allow_html=True)
                     char_count = len(st.session_state["generated_teaser"])
                     st.caption(f"{char_count} characters {'✅' if char_count <= 240 else '⚠️ over 240'}")
@@ -1458,7 +1465,7 @@ with col_detail:
                         )
                     st.rerun()
                 if st.session_state["generated_script"]:
-                    st.markdown(f'<div class="content-box">{st.session_state["generated_script"]}</div>',
+                    st.markdown(f'<div class="content-box">{html.escape(st.session_state["generated_script"])}</div>',
                                 unsafe_allow_html=True)
                     word_count = len(st.session_state["generated_script"].split())
                     st.caption(f"~{word_count} words · approx {word_count // 130 + 1} min read aloud")
