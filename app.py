@@ -23,24 +23,50 @@ st.set_page_config(
 # ── Custom CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-  .block-container { padding-top: 2.5rem; padding-bottom: 2rem; }
+  @import url('https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+  :root {
+    --brand:       var(--primary-color, #254886);
+    --brand-soft:  rgba(37,72,134,0.10);
+    --line:        rgba(37,72,134,0.16);
+    --line-strong: rgba(37,72,134,0.30);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --brand-soft:  rgba(126,163,222,0.16);
+      --line:        rgba(142,168,214,0.18);
+      --line-strong: rgba(142,168,214,0.32);
+    }
+  }
+
+  .stApp { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif !important; }
+  .stApp h1, .stApp h2, .stApp h3, .stApp h4 {
+    font-family: 'Red Hat Display', sans-serif !important;
+    font-weight: 800; letter-spacing: -0.01em;
+  }
+
+  .block-container { padding-top: 2.5rem; padding-bottom: 2.5rem; }
   .metric-card {
     background: var(--background-color);
-    border-radius: 10px; padding: 1rem 1.25rem;
-    border: 1px solid rgba(148,163,184,0.25);
-    margin-top: 0.5rem; margin-bottom: 0.5rem;
+    border-radius: 12px; padding: 1.35rem 1.5rem;
+    border: 1px solid var(--line);
+    margin-top: 0.75rem; margin-bottom: 0.75rem;
   }
-  .metric-card .label { font-size: 12px; margin: 0 0 4px; color: var(--text-color); opacity: 0.55; }
-  .metric-card .value { font-size: 24px; font-weight: 600; margin: 0; }
+  .metric-card .label { font-size: 12px; margin: 0 0 6px; color: var(--text-color); opacity: 0.6; }
+  .metric-card .value {
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 25px; font-weight: 600; margin: 0;
+  }
   .news-card {
     background: var(--background-color);
-    border-radius: 0 10px 10px 0; padding: 1rem 1.25rem;
-    border: 1px solid rgba(148,163,184,0.25);
-    margin-bottom: 0.75rem;
+    border-radius: 0 12px 12px 0; padding: 1.35rem 1.5rem;
+    border: 1px solid var(--line);
+    margin-bottom: 1.1rem;
   }
   .badge {
-    display: inline-block; font-size: 11px; padding: 2px 10px;
-    border-radius: 4px; font-weight: 500; margin-right: 6px;
+    display: inline-block; font-size: 11px; padding: 3px 11px;
+    border-radius: 5px; font-weight: 600; margin-right: 8px;
   }
   .bullish  { background: #16a34a; color: #fff; }
   .bearish  { background: #dc2626; color: #fff; }
@@ -48,56 +74,53 @@ st.markdown("""
   .high     { background: #d97706; color: #fff; }
   .medium   { background: rgba(148,163,184,0.2); color: var(--text-color); }
   .low      { background: rgba(148,163,184,0.12); color: var(--text-color); opacity: 0.7; }
-  .source-tag { font-size: 11px; opacity: 0.55; margin-bottom: 6px; color: var(--text-color); }
-  .headline   { font-size: 14px; font-weight: 600; margin: 4px 0; color: var(--text-color); }
-  .summary    { font-size: 12px; margin: 4px 0; color: var(--text-color); opacity: 0.75; }
-  .meta       { font-size: 11px; margin-top: 6px; color: var(--text-color); opacity: 0.6; }
+  .source-tag { font-size: 11px; opacity: 0.6; margin-bottom: 8px; color: var(--text-color); }
+  .headline   { font-family: 'Red Hat Display', sans-serif; font-size: 16px; font-weight: 700; margin: 6px 0; color: var(--text-color); }
+  .summary    { font-size: 12.5px; margin: 6px 0; color: var(--text-color); opacity: 0.75; line-height: 1.55; }
+  .meta       { font-size: 11px; margin-top: 10px; color: var(--text-color); opacity: 0.7; }
   .content-box {
-    background: rgba(148,163,184,0.08);
-    border-radius: 8px; padding: 1rem;
-    border: 1px solid rgba(148,163,184,0.25);
+    background: var(--brand-soft);
+    border-radius: 10px; padding: 1.35rem;
+    border: 1px solid var(--line);
     font-size: 13px; color: var(--text-color);
-    white-space: pre-wrap; line-height: 1.7;
+    white-space: pre-wrap; line-height: 1.75;
   }
-  a { color: #3b82f6; text-decoration: none; }
+  a { color: var(--brand); text-decoration: none; }
   a:hover { text-decoration: underline; }
 
-  /* -- Broadcast lower-third graphic -- */
+  /* -- Broadcast lower-third graphic (stays dark — mimics a physical TV overlay) -- */
   .lower-third-wrap {
-    margin-top: 10px;
-    font-family: 'Arial Narrow', Arial, sans-serif;
+    margin-top: 12px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
   }
   .lt-eyebrow {
-    display: inline-block;
-    background: #e63946;
-    color: #fff;
-    font-size: 9px;
-    font-weight: 800;
-    letter-spacing: 0.15em;
+    display: block;
+    color: var(--brand);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
-    padding: 2px 8px;
-    border-radius: 2px 2px 0 0;
-    margin-bottom: 0;
-    line-height: 1.6;
+    margin-bottom: 4px;
   }
   .lt-bar {
     display: flex;
     align-items: stretch;
-    border-radius: 0 4px 4px 0;
+    border-radius: 0 6px 6px 0;
     overflow: hidden;
     box-shadow: 0 2px 8px rgba(0,0,0,0.4);
   }
   .lt-accent {
     width: 5px;
-    background: #e63946;
+    background: var(--brand);
     flex-shrink: 0;
   }
   .lt-body {
     background: rgba(10,16,30,0.92);
-    padding: 6px 14px 7px 10px;
+    padding: 8px 16px 9px 12px;
     flex: 1;
   }
   .lt-headline {
+    font-family: 'Red Hat Display', sans-serif;
     font-size: 15px;
     font-weight: 700;
     color: #f1f5f9;
@@ -113,12 +136,12 @@ st.markdown("""
     margin: 0;
   }
   .lt-angle-tag {
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
-    color: #f59e0b;
+    color: var(--brand);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
 </style>
 """, unsafe_allow_html=True)
@@ -1133,7 +1156,7 @@ st.markdown("""
 <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
   <span style="font-size:22px">₿</span>
   <span style="font-size:16px;font-weight:700;color:#f59e0b;letter-spacing:-0.01em">CoinDesk Live</span>
-  <span style="font-size:11px;color:#475569;margin-left:4px">Real-time crypto & market data</span>
+  <span style="font-size:11px;color:var(--text-color);opacity:0.6;margin-left:4px">Real-time crypto & market data</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1178,7 +1201,7 @@ else:
                     st.markdown(
                         f'<div class="metric-card" style="text-align:center;">'
                         f'<p class="label">{p["symbol"]}</p>'
-                        f'<p style="font-size:11px;color:#64748b">Unavailable</p></div>',
+                        f'<p style="font-size:11px;color:var(--text-color);opacity:0.6">Unavailable</p></div>',
                         unsafe_allow_html=True
                     )
 
@@ -1188,15 +1211,15 @@ else:
         news_html = ""
         for n in news:
             news_html += (
-                f'<div style="padding:8px 0;border-bottom:1px solid #1e293b;">'
-                f'<a href="{safe_url(n["link"])}" target="_blank" style="font-size:13px;font-weight:600;color:#e2e8f0;">'
+                f'<div style="padding:10px 0;border-bottom:1px solid var(--line);">'
+                f'<a href="{safe_url(n["link"])}" target="_blank" style="font-size:13px;font-weight:600;color:var(--text-color);">'
                 f'{html.escape(n["title"])}</a>'
-                + (f'<div style="font-size:11px;color:#64748b;margin-top:3px">{html.escape(n["summary"])}</div>' if n["summary"] else "")
+                + (f'<div style="font-size:11px;color:var(--text-color);opacity:0.6;margin-top:3px">{html.escape(n["summary"])}</div>' if n["summary"] else "")
                 + f'</div>'
             )
         st.markdown(
-            f'<div style="background:#0a1628;border:1px solid #1e293b;border-radius:10px;'
-            f'padding:12px 16px;border-left:3px solid #f59e0b;">{news_html}</div>',
+            f'<div style="background:var(--background-color);border:1px solid var(--line);border-radius:12px;'
+            f'padding:14px 18px;border-left:3px solid #f59e0b;">{news_html}</div>',
             unsafe_allow_html=True
         )
 
@@ -1279,7 +1302,7 @@ with col_feed:
             sector_icon = SECTOR_COLORS.get(sector, "⬜")
 
             ticker_html = " ".join(
-                f'<span style="font-size:11px;background:#ede9fe;color:#5b21b6;padding:1px 7px;border-radius:4px">{html.escape(str(t))}</span>'
+                f'<span style="font-size:11px;background:var(--brand-soft);color:var(--brand);padding:2px 8px;border-radius:5px;font-weight:600">{html.escape(str(t))}</span>'
                 for t in tickers
             ) if tickers else ""
 
