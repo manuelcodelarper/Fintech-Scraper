@@ -314,6 +314,39 @@ def is_near_duplicate(a: str, b: str) -> bool:
         return False
     return na == nb or difflib.SequenceMatcher(None, na, nb).ratio() > 0.82
 
+# ── Relevance filter (used at scrape time to drop non-finance news) ────────────
+# Bare geography words (uae/saudi/gulf/etc.) were deliberately dropped from here —
+# region relevance is already handled by each source's tagged "region", and
+# geography-only keywords let through any regional story regardless of topic
+# (crime, politics, sports...) just because it named a Gulf country.
+FINANCE_KEYWORDS = [
+    "market", "stock", "share", "equity", "equities", "bond", "ipo", "merger",
+    "acquisition", "spinoff", "spin-off", "economy", "economic", "gdp",
+    "inflation", "interest rate", "central bank", "federal reserve", "fed chair",
+    "financial", "investor", "investors", "invest", "earnings", "profit",
+    "revenue", "oil", "gold", "crude", "opec", "currency", "dollar", "euro",
+    "forex", "crypto", "bitcoin", "ethereum", "etf", "index", "stock market",
+    "nasdaq", "s&p", "dow jones", "tasi", "dfm", "adx", "tadawul",
+    "debt", "deficit", "budget", "fiscal", "monetary policy", "recession",
+    "rally", "selloff", "dividend", "yield", "real estate", "property market",
+    "mortgage", "hedge fund", "sovereign wealth fund", "venture capital",
+    "fintech", "banking sector", "banker", "bankers", "trade deal", "trade war",
+    "tariff", "sanctions", "imf", "world bank", "manufacturing activity", "pmi",
+    "fraud", "embezzlement", "money laundering", "insider trading",
+    "bankruptcy", "layoffs", "job cuts",
+]
+# Specific non-finance topics that should veto a match even if a finance
+# keyword above happens to co-occur (e.g. a bare "bank" or "share" mention).
+# Deliberately narrow — generic words like "arrested"/"jailed" are excluded
+# from this list since finance fraud stories legitimately involve arrests.
+EXCLUDE_KEYWORDS = [
+    "sexual abuse", "sexually abused", "rape", "raped", "molest", "child abuse",
+    "murder", "murdered", "stabbing", "stabbed", "shooting", "shot dead",
+    "gunman", "kidnap", "assault", "domestic violence", "drug trafficking",
+    "wildfire", "earthquake", "flood warning", "road accident", "car crash",
+    "football match", "celebrity", "divorce", "wedding",
+]
+
 # Classification is now driven by the "region" field on each source dict.
 # For items already in the DB without a region field, we fall back to keyword matching.
 GULF_KEYWORDS_FB = [
@@ -680,21 +713,13 @@ async def fetch_one_url(session, url, source, now_dt, week_ago, year_floor):
             # Strip Google News " - Publisher" suffix from titles
             title = re.sub(r"\s+-\s+[A-Z][^-]{2,40}$", "", title).strip()
 
-            # Relevance filter — must contain at least one finance/market keyword
-            FINANCE_KEYWORDS = [
-                "market", "stock", "share", "equity", "bond", "fund", "trade",
-                "economy", "economic", "gdp", "inflation", "interest rate", "fed",
-                "central bank", "bank", "finance", "financial", "invest", "earn",
-                "profit", "revenue", "ipo", "merger", "acquisition", "oil", "gold",
-                "crude", "opec", "currency", "dollar", "euro", "forex", "crypto",
-                "bitcoin", "etf", "index", "nasdaq", "s&p", "dow", "tasi", "dfm",
-                "adx", "tadawul", "gcc", "gulf", "mena", "uae", "saudi", "qatar",
-                "debt", "deficit", "budget", "fiscal", "monetary", "rate", "growth",
-                "recession", "rally", "selloff", "ipo", "dividend", "yield",
-            ]
+            # Relevance filter — must contain a finance/market keyword and no
+            # non-finance topic that would veto an incidental keyword match.
             title_lower = title.lower()
             summary_lower = (e.get("summary", "") or "").lower()
-            if not any(kw in title_lower or kw in summary_lower for kw in FINANCE_KEYWORDS):
+            has_finance = any(kw in title_lower or kw in summary_lower for kw in FINANCE_KEYWORDS)
+            has_exclude = any(kw in title_lower or kw in summary_lower for kw in EXCLUDE_KEYWORDS)
+            if not has_finance or has_exclude:
                 continue
 
             pub_dt = parse_entry_date(e)
