@@ -10,6 +10,7 @@ import time
 import requests
 import threading
 import urllib.parse
+import difflib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -304,6 +305,15 @@ def safe_url(url: str) -> str:
     url = (url or "").strip()
     return url if url.startswith(("http://", "https://")) else "#"
 
+def is_near_duplicate(a: str, b: str) -> bool:
+    """True if two strings are (almost) the same once case/punctuation is stripped —
+    used to catch a lower-third that just restates its headline instead of adding to it."""
+    norm = lambda s: re.sub(r"[^a-z0-9 ]", "", (s or "").lower()).strip()
+    na, nb = norm(a), norm(b)
+    if not na or not nb:
+        return False
+    return na == nb or difflib.SequenceMatcher(None, na, nb).ratio() > 0.82
+
 # Classification is now driven by the "region" field on each source dict.
 # For items already in the DB without a region field, we fall back to keyword matching.
 GULF_KEYWORDS_FB = [
@@ -477,7 +487,7 @@ def load_items(keyword="", sentiment="All", sector="All", importance="All", limi
     if min_id is not None:
         q += " AND id > ?"
         params.append(min_id)
-    q += " ORDER BY published DESC, fetched_at DESC LIMIT ?"
+    q += " ORDER BY published DESC, fetched_at DESC, id DESC LIMIT ?"
     params.append(limit)
     rows = [dict(r) for r in con.execute(q, params).fetchall()]
     con.close()
@@ -788,7 +798,7 @@ def run_scrape(extra_sources=None, only_extra=False):
 
     con.close()
     update_session_count(session_id, total_new)
-    return total_new, log
+    return session_id, total_new, log
 
 
 # ── Gemini API helpers ─────────────────────────────────────────────────────────
@@ -829,7 +839,7 @@ ENRICH_USER = """Analyse this headline and return JSON with exactly these fields
   tickers     : list of stock tickers or company names mentioned (empty list if none)
   sector      : one of: Energy, Banking, Real Estate, Technology, Retail, Transport, Government, Macro, Other
   importance  : one of: High, Medium, Low
-  lower_third : a broadcast lower-third subtitle (max 8 words). Must be a factual detail — a specific number, name, location or consequence. NOT a repeat of the headline. Example: "Brent crude falls 3.2% to $71.40" or "UAE central bank holds rate at 5.15%"
+  lower_third : a broadcast lower-third subtitle (max 8 words). Must be a factual detail — a specific number, name, location or consequence — that is NOT already in the headline. Example: "Brent crude falls 3.2% to $71.40" or "UAE central bank holds rate at 5.15%". If the headline already states the only newsworthy fact and you cannot add a genuinely new detail, return an empty string "" for this field instead of restating the headline.
 
 Headline: {title}
 Summary: {summary}"""
@@ -838,7 +848,7 @@ def enrich_with_claude(api_key, title, summary):
     try:
         raw = claude_call(api_key, ENRICH_SYSTEM, ENRICH_USER.format(title=title, summary=summary[:300]), json_mode=True)
         result = json.loads(raw)
-        if not result.get("lower_third"):
+        if not result.get("lower_third") or is_near_duplicate(result["lower_third"], title):
             result["lower_third"] = ""
         return result
     except Exception:
@@ -855,12 +865,14 @@ def generate_lower_third(api_key: str, title: str, summary: str) -> str:
         system = "You are a broadcast news producer. Return ONLY the lower-third subtitle text — no quotes, no explanation, nothing else."
         user   = (
             f"Write ONE lower-third subtitle for this headline.\n"
-            f"Rules: max 8 words, must be a specific factual detail (number, %, name, location or consequence), "
-            f"must ADD information not in the headline, no punctuation at end.\n\n"
+            f"Rules: max 8 words, must be a specific factual detail (number, %, name, location or consequence) "
+            f"that is NOT already stated in the headline, no punctuation at end. "
+            f"If there is no new detail to add, return an empty string instead of restating the headline.\n\n"
             f"Headline: {title}\n"
             f"Context: {summary[:200]}"
         )
-        return claude_call(api_key, system, user).strip().strip('"').strip("'")
+        lt = claude_call(api_key, system, user).strip().strip('"').strip("'")
+        return "" if is_near_duplicate(lt, title) else lt
     except Exception:
         return ""
 
@@ -905,7 +917,7 @@ HEADLINE_SYSTEM = (
 )
 HEADLINE_USER = """Generate 5 headline packages for this story. Each package has two parts:
   1. headline   : the main on-screen headline (max 12 words, punchy, clear)
-  2. lower_third: the broadcast lower-third subtitle (max 8 words, factual detail that adds context — a name, figure, location, or consequence. NOT a repeat of the headline)
+  2. lower_third: the broadcast lower-third subtitle (max 8 words, factual detail that adds context — a name, figure, location, or consequence — that is NOT already stated in that package's own headline. If you cannot add a genuinely new detail, use an empty string instead of restating the headline)
 
 Vary the angle across the 5 packages:
   - Package 1: Data-focused (lead with the number or percentage)
@@ -939,10 +951,11 @@ def generate_headlines(api_key, item):
         result = []
         for item_p in parsed:
             if isinstance(item_p, dict):
-                result.append({
-                    "headline":    item_p.get("headline", str(item_p)),
-                    "lower_third": item_p.get("lower_third", ""),
-                })
+                headline    = item_p.get("headline", str(item_p))
+                lower_third = item_p.get("lower_third", "")
+                if is_near_duplicate(lower_third, headline):
+                    lower_third = ""
+                result.append({"headline": headline, "lower_third": lower_third})
             else:
                 result.append({"headline": str(item_p), "lower_third": ""})
         return result
@@ -1103,13 +1116,21 @@ with st.sidebar:
     st.markdown("### ⚡ Scrape controls")
     scrape_label = f"🔍 Search & Scrape: \"{search_query[:25]}\"" if search_query.strip() else "🔄 Scrape now"
     if st.button(scrape_label, use_container_width=True, type="primary"):
-        spinner_msg = f"Searching for \"{search_query}\"…" if search_query.strip() else "Fetching all sources in parallel…"
+        is_search = bool(search_query.strip())
+        spinner_msg = f"Searching for \"{search_query}\"…" if is_search else "Fetching all sources in parallel…"
         with st.spinner(spinner_msg):
-            new_count, log = run_scrape(custom_sources, only_extra=bool(search_query.strip()))
+            new_session_id, new_count, log = run_scrape(custom_sources, only_extra=is_search)
         st.success(f"{new_count} new items saved")
         with st.expander("Scrape log"):
             for line in log:
                 st.text(line)
+        if is_search:
+            # Point the session picker at just this search's results, so a new
+            # search doesn't stay mixed in with whatever was showing before.
+            fresh_sessions = load_sessions()
+            match = next((s for s in fresh_sessions if s["id"] == new_session_id), None)
+            if match:
+                st.session_state["session_view_select"] = f"{match['started_at']} — {match['item_count']} items"
         st.rerun()
 
     auto_scrape = st.toggle("Auto-scrape every 30 min", value=False)
@@ -1138,7 +1159,7 @@ with st.sidebar:
             label = f"{s['started_at']} — {s['item_count']} items"
             session_options[label] = s["id"]
         session_options["All history (every session)"] = "__all__"
-        chosen = st.selectbox("View session", list(session_options.keys()), index=0)
+        chosen = st.selectbox("View session", list(session_options.keys()), index=0, key="session_view_select")
         selection = session_options[chosen]
         if selection == "__boundary__":
             selected_session_id = None
