@@ -9,6 +9,7 @@ import re
 import time
 import requests
 import threading
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -491,13 +492,21 @@ def update_item_ai(con, link, ai_data):
          ai_data.get("importance", "Low"), ai_data.get("lower_third", ""), link))
     con.commit()
 
-def get_stats():
+def get_stats(session_id=None, min_id=None):
     con = get_db_connection()
-    total    = con.execute("SELECT COUNT(*) FROM items").fetchone()[0]
-    bullish  = con.execute("SELECT COUNT(*) FROM items WHERE sentiment='Bullish'").fetchone()[0]
-    bearish  = con.execute("SELECT COUNT(*) FROM items WHERE sentiment='Bearish'").fetchone()[0]
-    high_imp = con.execute("SELECT COUNT(*) FROM items WHERE importance='High'").fetchone()[0]
-    enriched = con.execute("SELECT COUNT(*) FROM items WHERE enriched=1").fetchone()[0]
+    base = "SELECT COUNT(*) FROM items WHERE 1=1"
+    params = []
+    if session_id is not None:
+        base += " AND session_id = ?"
+        params.append(session_id)
+    if min_id is not None:
+        base += " AND id > ?"
+        params.append(min_id)
+    total    = con.execute(base, params).fetchone()[0]
+    bullish  = con.execute(base + " AND sentiment='Bullish'", params).fetchone()[0]
+    bearish  = con.execute(base + " AND sentiment='Bearish'", params).fetchone()[0]
+    high_imp = con.execute(base + " AND importance='High'", params).fetchone()[0]
+    enriched = con.execute(base + " AND enriched=1", params).fetchone()[0]
     con.close()
     return total, bullish, bearish, high_imp, enriched
 
@@ -739,8 +748,8 @@ async def fetch_feed(session, source):
     return source["name"], False, [], err
 
 
-async def scrape_all(extra_sources=None):
-    all_sources = SOURCES + (extra_sources or [])
+async def scrape_all(extra_sources=None, only_extra=False):
+    all_sources = (extra_sources or []) if only_extra else SOURCES + (extra_sources or [])
     # High concurrency — all feeds fetched simultaneously
     connector = aiohttp.TCPConnector(
         limit=50, limit_per_host=3,
@@ -756,14 +765,14 @@ async def scrape_all(extra_sources=None):
         )
 
 
-def run_scrape(extra_sources=None):
+def run_scrape(extra_sources=None, only_extra=False):
     try:
-        results = asyncio.run(scrape_all(extra_sources))
+        results = asyncio.run(scrape_all(extra_sources, only_extra))
     except RuntimeError:
         # Fallback if event loop already running (e.g. some Streamlit versions)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        results = loop.run_until_complete(scrape_all(extra_sources))
+        results = loop.run_until_complete(scrape_all(extra_sources, only_extra))
     session_id = start_session()
     con        = get_db_connection()
     total_new = 0
@@ -1052,24 +1061,30 @@ with st.sidebar:
     )
 
     def build_search_sources(query: str) -> list:
-        """Build Gulf + US scoped Google News sources for a free-text search."""
+        """Build Gulf + US scoped Google News sources for a free-text search.
+        The search term is parenthesised separately from the regional/finance
+        context terms so Google's query parser ANDs it in, instead of treating
+        it as just one branch of a broad OR chain (which made every search
+        return the same generic Gulf/US finance headlines regardless of the
+        term typed)."""
         if not query.strip():
             return []
         q = query.strip()
-        q_encoded = q.replace(" ", "+")
         short_name = q[:20]
+        gulf_q = urllib.parse.quote_plus(f"{q} (UAE OR Saudi OR Gulf OR MENA OR finance)")
+        us_q   = urllib.parse.quote_plus(f"{q} (finance OR market OR stock)")
         return [
             {
                 "name": f"Search: {short_name} (Gulf)",
                 "label": f"Search — {q} (Gulf/MENA)",
                 "country": "🌍", "type": "news", "region": "gulf",
-                "url": f"https://news.google.com/rss/search?q={q_encoded}+UAE+OR+Saudi+OR+Gulf+OR+MENA+finance&hl=en-AE&gl=AE&ceid=AE:en",
+                "url": f"https://news.google.com/rss/search?q={gulf_q}&hl=en-AE&gl=AE&ceid=AE:en",
             },
             {
                 "name": f"Search: {short_name} (US)",
                 "label": f"Search — {q} (US/Global)",
                 "country": "🇺🇸", "type": "news", "region": "us",
-                "url": f"https://news.google.com/rss/search?q={q_encoded}+finance+OR+market+OR+stock&hl=en&gl=US&ceid=US:en",
+                "url": f"https://news.google.com/rss/search?q={us_q}&hl=en&gl=US&ceid=US:en",
             },
         ]
 
@@ -1090,7 +1105,7 @@ with st.sidebar:
     if st.button(scrape_label, use_container_width=True, type="primary"):
         spinner_msg = f"Searching for \"{search_query}\"…" if search_query.strip() else "Fetching all sources in parallel…"
         with st.spinner(spinner_msg):
-            new_count, log = run_scrape(custom_sources)
+            new_count, log = run_scrape(custom_sources, only_extra=bool(search_query.strip()))
         st.success(f"{new_count} new items saved")
         with st.expander("Scrape log"):
             for line in log:
@@ -1169,7 +1184,7 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN AREA
 # ══════════════════════════════════════════════════════════════════════════════
-total, bullish, bearish, high_imp, enriched = get_stats()
+total, bullish, bearish, high_imp, enriched = get_stats(session_id=selected_session_id, min_id=min_id_filter)
 
 st.markdown("<div style='margin-top:1rem'></div>", unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════════════════
