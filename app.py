@@ -452,7 +452,7 @@ def save_items(con, items, session_id=None):
     con.commit()
     return saved
 
-def load_items(keyword="", sentiment="All", sector="All", importance="All", limit=100, session_id=None):
+def load_items(keyword="", sentiment="All", sector="All", importance="All", limit=100, session_id=None, min_id=None):
     con = get_db_connection()
     con.row_factory = sqlite3.Row
     q = "SELECT * FROM items WHERE 1=1"
@@ -473,6 +473,9 @@ def load_items(keyword="", sentiment="All", sector="All", importance="All", limi
     if session_id is not None:
         q += " AND session_id = ?"
         params.append(session_id)
+    if min_id is not None:
+        q += " AND id > ?"
+        params.append(min_id)
     q += " ORDER BY published DESC, fetched_at DESC LIMIT ?"
     params.append(limit)
     rows = [dict(r) for r in con.execute(q, params).fetchall()]
@@ -1000,6 +1003,15 @@ def schedule_scrape(interval_minutes, extra_sources=None):
 if "db_init" not in st.session_state:
     init_db()
     st.session_state["db_init"] = True
+if "session_boundary_id" not in st.session_state:
+    # Marks the newest item that existed before this browser session started —
+    # the default feed view only shows items scraped after this, so a fresh
+    # page load doesn't dump every headline ever scraped.
+    _con = get_db_connection()
+    st.session_state["session_boundary_id"] = _con.execute(
+        "SELECT COALESCE(MAX(id), 0) FROM items"
+    ).fetchone()[0]
+    _con.close()
 if "scheduler_started" not in st.session_state:
     st.session_state["scheduler_started"] = False
 if "selected_item" not in st.session_state:
@@ -1104,13 +1116,24 @@ with st.sidebar:
     if not sessions:
         st.caption("No scrape sessions yet.")
         selected_session_id = None
+        min_id_filter = st.session_state["session_boundary_id"]
     else:
-        session_options = {"All sessions (combined)": None}
+        session_options = {"New headlines (this visit)": "__boundary__"}
         for s in sessions:
             label = f"{s['started_at']} — {s['item_count']} items"
             session_options[label] = s["id"]
+        session_options["All history (every session)"] = "__all__"
         chosen = st.selectbox("View session", list(session_options.keys()), index=0)
-        selected_session_id = session_options[chosen]
+        selection = session_options[chosen]
+        if selection == "__boundary__":
+            selected_session_id = None
+            min_id_filter = st.session_state["session_boundary_id"]
+        elif selection == "__all__":
+            selected_session_id = None
+            min_id_filter = None
+        else:
+            selected_session_id = selection
+            min_id_filter = None
 
     st.markdown("---")
 
@@ -1240,7 +1263,7 @@ with c5:
 st.markdown("---")
 
 # ── Load items ─────────────────────────────────────────────────────────────────
-items = load_items(keyword, sentiment_filter, sector_filter, importance_filter, limit, session_id=selected_session_id)
+items = load_items(keyword, sentiment_filter, sector_filter, importance_filter, limit, session_id=selected_session_id, min_id=min_id_filter)
 
 col_feed, col_detail = st.columns([3, 2], gap="large")
 
